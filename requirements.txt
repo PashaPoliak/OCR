@@ -1,9 +1,2 @@
-aiogram
-aiohttp
-python-dotenv
-watchdog
-easyocr
-pillow
-requests
 flask
 gunicorn
