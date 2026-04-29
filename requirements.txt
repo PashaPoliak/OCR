@@ -6,3 +6,4 @@ easyocr
 pillow
 requests
 flask
+gunicorn
