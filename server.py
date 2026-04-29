@@ -38,5 +38,37 @@ def receive_text():
         logging.error(f"Error processing request: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/texts', methods=['GET'])
+def get_texts():
+    try:
+        texts_dir = 'extracted_texts'
+        if not os.path.exists(texts_dir):
+            return jsonify({'texts': []})
+        
+        texts = []
+        for file in sorted(os.listdir(texts_dir), reverse=True):  # Most recent first
+            if file.endswith('.txt'):
+                filepath = os.path.join(texts_dir, file)
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Parse the file content
+                    lines = content.split('\n')
+                    filename = lines[0].replace('Filename: ', '') if lines else 'Unknown'
+                    timestamp = lines[1].replace('Timestamp: ', '') if len(lines) > 1 else 'Unknown'
+                    text_content = '\n'.join(lines[3:]) if len(lines) > 3 else ''
+                    
+                    texts.append({
+                        'filename': filename,
+                        'timestamp': timestamp,
+                        'text': text_content,
+                        'file': file
+                    })
+        
+        return jsonify({'texts': texts})
+    
+    except Exception as e:
+        logging.error(f"Error retrieving texts: {e}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=3000, debug=False)
