@@ -51,18 +51,10 @@ def get_texts():
                 filepath = os.path.join(texts_dir, file)
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
-                    # Parse the file content
+                    # Extract only the text content (after "Text:\n")
                     lines = content.split('\n')
-                    filename = lines[0].replace('Filename: ', '') if lines else 'Unknown'
-                    timestamp = lines[1].replace('Timestamp: ', '') if len(lines) > 1 else 'Unknown'
                     text_content = '\n'.join(lines[3:]) if len(lines) > 3 else ''
-                    
-                    texts.append({
-                        'filename': filename,
-                        'timestamp': timestamp,
-                        'text': text_content,
-                        'file': file
-                    })
+                    texts.append(text_content.strip())
         
         return jsonify({'texts': texts})
     
