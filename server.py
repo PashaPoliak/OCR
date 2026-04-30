@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 import logging
 import os
 from datetime import datetime
@@ -61,6 +61,55 @@ def get_texts():
     except Exception as e:
         logging.error(f"Error retrieving texts: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/')
+def index():
+    html = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OCR Texts</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .text-item { border: 1px solid #ccc; padding: 10px; margin: 10px 0; white-space: pre-wrap; }
+        .loading { color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Extracted OCR Texts</h1>
+    <div id="texts-container">
+        <div class="loading">Loading texts...</div>
+    </div>
+
+    <script>
+        async function fetchTexts() {
+            try {
+                const response = await fetch('/api/texts');
+                const data = await response.json();
+                const container = document.getElementById('texts-container');
+                
+                if (data.texts && data.texts.length > 0) {
+                    container.innerHTML = data.texts.map(text => 
+                        `<div class="text-item">${text}</div>`
+                    ).join('');
+                } else {
+                    container.innerHTML = '<div class="loading">No texts available yet.</div>';
+                }
+            } catch (error) {
+                document.getElementById('texts-container').innerHTML = 
+                    '<div class="loading">Error loading texts. Please try again.</div>';
+                console.error('Error fetching texts:', error);
+            }
+        }
+
+        // Fetch texts immediately and then every 5 seconds
+        fetchTexts();
+        setInterval(fetchTexts, 5000);
+    </script>
+</body>
+</html>
+'''
+    return render_template_string(html)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=3000, debug=False)
