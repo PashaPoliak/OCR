@@ -91,15 +91,9 @@ def index():
             transition: all 0.3s ease;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .text-item:hover { 
-            transform: translateY(-2px); 
+        .text-item:hover {
             box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-        }
-        .text-item.removing {
-            animation: fadeOut 0.5s forwards;
-        }
-        @keyframes fadeOut {
-            to { opacity: 0; transform: scale(0.95); }
+            cursor: pointer;
         }
         .text-item .actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; }
         .text-item .actions button { 
@@ -140,7 +134,7 @@ def index():
                 
                 if (data.texts && data.texts.length > 0) {
                     container.innerHTML = data.texts.map(item => 
-                        `<div class="text-item" data-id="${item.id}">${item.text}<div class="actions"><button class="copy-btn" onclick="copyText(this)">Copy</button><button class="cut-btn" onclick="cutText(this)">Cut</button><button class="delete-btn" onclick="deleteText(this)">Delete</button></div></div>`
+                        `<div class="text-item" data-id="${item.id}" onclick="cutText(this)">${item.text}</div>`
                     ).join('');
                 }
             } catch (error) {
@@ -150,39 +144,13 @@ def index():
             }
         }
 
-        function copyText(button) {
-            const item = button.closest('.text-item');
-            const text = item.cloneNode(true);
-            text.querySelector('.actions').remove();
-            navigator.clipboard.writeText(text.textContent).then(() => {
-                button.classList.add('copied');
-                const original = button.textContent;
-                button.textContent = 'Copied!';
-                setTimeout(() => {
-                    button.classList.remove('copied');
-                    button.textContent = original;
-                }, 1000);
-            });
-        }
-
-        async function cutText(button) {
-            const item = button.closest('.text-item');
-            const text = item.cloneNode(true);
-            text.querySelector('.actions').remove();
-            navigator.clipboard.writeText(text.textContent).then(async () => {
-                const fileId = item.dataset.id;
-                await fetch(`/api/text/${fileId}`, { method: 'DELETE' });
-                item.classList.add('removing');
-                setTimeout(() => item.remove(), 500);
-            });
-        }
-
-        async function deleteText(button) {
-            const item = button.closest('.text-item');
-            const fileId = item.dataset.id;
+        async function cutText(element) {
+            const text = element.textContent.trim();
+            await navigator.clipboard.writeText(text);
+            const fileId = element.dataset.id;
             await fetch(`/api/text/${fileId}`, { method: 'DELETE' });
-            item.classList.add('removing');
-            setTimeout(() => item.remove(), 500);
+            element.classList.add('removing');
+            setTimeout(() => element.remove(), 500);
         }
 
         fetchTexts();
