@@ -36,7 +36,7 @@ def receive_text():
         logging.error(f"Error processing request: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/texts', methods=['GET'])
+@app.route('/api/text', methods=['GET'])
 def get_texts():
     try:
         texts_dir = 'extracted_texts'
@@ -72,6 +72,107 @@ def delete_text(file_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/')
+def camera():
+    html = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Photo OCR App</title>
+</head>
+<body>
+    <div>
+        <video id="video" width="300" height="200" autoplay></video>
+        <br>
+        <button onclick="takePhoto()">Take Photo</button>
+    </div>
+
+    <canvas id="canvas" width="300" height="200" style="display:none;"></canvas>
+
+    <div id="imagePreview"></div>
+
+    <div id="loading" style="display:none;">
+        <p>Processing image...</p>
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        const SERVER = '/api/text';
+        let capturedText = '';
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                document.getElementById('video').srcObject = stream;
+            } catch (error) {
+                alert('Camera access denied: ' + error.message);
+            }
+        }
+
+        function takePhoto() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const context = canvas.getContext('2d');
+
+            context.drawImage(video, 0, 0, 300, 200);
+
+            const imageUrl = canvas.toDataURL('image/jpeg', 0.8);
+            document.getElementById('imagePreview').innerHTML =
+                '<img src="' + imageUrl + '" width="300" alt="Captured photo">';
+
+            capturedText = 'Photo captured at ' + new Date().toLocaleString();
+            document.getElementById('result').innerHTML = '';
+            uploadImage();
+        }
+
+        async function uploadImage() {
+            if (!capturedText) {
+                alert('Please take a photo first');
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'block';
+
+            try {
+                const response = await fetch(SERVER, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filename: 'photo.jpg',
+                        text: capturedText
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('result').innerHTML =
+                        '<h3>Success:</h3><p>Text sent successfully!</p>';
+                } else {
+                    document.getElementById('result').innerHTML =
+                        '<h3>Error:</h3><p>' + data.error + '</p>';
+                }
+
+            } catch (error) {
+                document.getElementById('result').innerHTML =
+                    '<h3>Error:</h3><p>' + error.message + '</p>';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        startCamera();
+    </script>
+</body>
+</html>
+'''
+    return render_template_string(html)
+
+@app.route('/quiz')
 def index():
     html = '''
 <!DOCTYPE html>
