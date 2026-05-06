@@ -1,12 +1,13 @@
 from flask import Flask, request, jsonify, render_template_string
 import os
 from datetime import datetime
-import easyocr
+import pytesseract
+from PIL import Image
+import io
 
 app = Flask(__name__)
 STORAGE_DIR = 'extracted_texts'
 os.makedirs(STORAGE_DIR, exist_ok=True)
-reader = easyocr.Reader(['en'])
 
 @app.route('/api/text', methods=['POST'])
 def receive_text():
@@ -17,18 +18,13 @@ def receive_text():
         
         filename = data['filename']
         text = data['text']
-        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_file = f"extracted_texts/{timestamp}_{filename}.txt"
-        os.makedirs('extracted_texts', exist_ok=True)
+        output_file = os.path.join(STORAGE_DIR, f"{timestamp}_{filename}.txt")
         
         with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(f"Filename: {filename}\n")
-            f.write(f"Timestamp: {datetime.now()}\n")
-            f.write(f"Text:\n{text}\n")
+            f.write(f"Filename: {filename}\nTimestamp: {datetime.now()}\nText:\n{text}\n")
         
         return jsonify({'status': 'success', 'file': output_file})
-    
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -39,18 +35,16 @@ def receive_image():
             return jsonify({'error': 'No image provided'}), 400
             
         file = request.files['image']
+        
+        # Process OCR in-memory to save I/O and disk space
+        img = Image.open(file.stream)
+        text = pytesseract.image_to_string(img).strip()
+        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        img_path = os.path.join(STORAGE_DIR, f"{timestamp}_capture.jpg")
-        file.save(img_path)
+        output_file = os.path.join(STORAGE_DIR, f"{timestamp}_capture.jpg.txt")
         
-        results = reader.readtext(img_path)
-        text = ' '.join([result[1] for result in results]).strip()
-        
-        output_file = img_path + ".txt"
         with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(f"Filename: capture.jpg\n")
-            f.write(f"Timestamp: {datetime.now()}\n")
-            f.write(f"Text:\n{text}\n")
+            f.write(f"Filename: capture.jpg\nTimestamp: {datetime.now()}\nText:\n{text}\n")
             
         return jsonify({'status': 'success', 'text': text})
     except Exception as e:
@@ -125,7 +119,7 @@ def camera():
                 const formData = new FormData();
                 formData.append('image', blob, 'photo.jpg');
                 await fetch('/api/image', { method: 'POST', body: formData });
-            }, 'image/jpeg', 0.9);
+            }, 'image/jpeg', 0.8);
         }
         start();
     </script>
@@ -143,12 +137,8 @@ def quiz():
     <style>
         body { font-family: sans-serif; background: #f5f5f5; padding: 15px; margin: 0; }
         .text-item { 
-            border: 1px solid #ddd; 
-            padding: 15px; 
-            margin-bottom: 10px; 
-            background: white; 
-            white-space: pre-wrap; 
-            word-break: break-all;
+            border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; 
+            background: white; white-space: pre-wrap; word-break: break-all;
             cursor: pointer;
         }
     </style>
