@@ -1,142 +1,95 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Camera → OCR</title>
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; padding: 1rem; }
-#wrap { max-width: 560px; width: 100%; display: flex; flex-direction: column; gap: 14px; }
-#cam-box {
-  width: 100%; aspect-ratio: 16/9;
-  border-radius: 12px; border: 1px solid #ddd;
-  background: #e8e8e8; overflow: hidden; position: relative;
-  display: flex; align-items: center; justify-content: center;
-}
-video, canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
-#canvas { display: none; }
-#idle { display: flex; flex-direction: column; align-items: center; gap: 8px; color: #999; }
-#idle svg { width: 44px; height: 44px; }
-#idle span { font-size: 13px; }
-#badge {
-  display: none; position: absolute; top: 10px; right: 10px;
-  font-size: 12px; padding: 3px 10px; border-radius: 6px;
-  border: 1px solid #ccc; background: #fff;
-}
-.btn {
-  padding: 13px; border-radius: 8px; border: 1px solid #bbb;
-  background: #fff; color: #111; font-size: 14px; font-weight: 500;
-  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
-}
-.btn:hover { background: #f0f0f0; }
-.btn:active { transform: scale(0.97); }
-.btn:disabled { opacity: 0.35; pointer-events: none; }
-#log {
-  display: none; font-size: 12px; color: #555; background: #f0f0f0;
-  border: 1px solid #ddd; border-radius: 8px;
-  padding: 10px 12px; white-space: pre-wrap; word-break: break-all; line-height: 1.6;
-}
-</style>
+    <title>Photo OCR App</title>
 </head>
 <body>
-<div id="wrap">
-  <div id="cam-box">
-    <div id="idle">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#bbb" stroke-width="1.5"><path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/></svg>
-      <span>Click Start to open camera</span>
+    <div>
+        <video id="video" width="300" height="200" autoplay></video>
+        <br>
+        <button onclick="takePhoto()">Take Photo</button>
     </div>
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
-    <div id="badge"></div>
-  </div>
+    
+    <canvas id="canvas" width="300" height="200" style="display:none;"></canvas>
+    
+    <div id="imagePreview"></div>
+    
+    <div id="loading" style="display:none;">
+        <p>Processing image...</p>
+    </div>
+    
+    <div id="result"></div>
 
-  <button class="btn" id="btn-start" onclick="startCam()">▶ Start camera</button>
-  <button class="btn" id="btn-snap" onclick="snapAndSend()" disabled>📷 Take photo &amp; send</button>
-  <button class="btn" id="btn-retake" onclick="retake()" style="display:none;">↺ Retake</button>
-  <div id="log"></div>
-</div>
+    <script>
+        const SERVER = 'http://127.0.0.1:3000/api/text';
+        let capturedText = '';
 
-<script>
-  const SERVER = 'https://ocr-vh1p.onrender.com/';
-  let stream = null;
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                document.getElementById('video').srcObject = stream;
+            } catch (error) {
+                alert('Camera access denied: ' + error.message);
+            }
+        }
 
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  const idle = document.getElementById('idle');
-  const badge = document.getElementById('badge');
-  const logEl = document.getElementById('log');
-  const btnStart = document.getElementById('btn-start');
-  const btnSnap = document.getElementById('btn-snap');
-  const btnRetake = document.getElementById('btn-retake');
+        function takePhoto() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const context = canvas.getContext('2d');
+            
+            context.drawImage(video, 0, 0, 300, 200);
+            
+            const imageUrl = canvas.toDataURL('image/jpeg', 0.8);
+            document.getElementById('imagePreview').innerHTML = 
+                '<img src="' + imageUrl + '" width="300" alt="Captured photo">';
+            
+            capturedText = 'Photo captured at ' + new Date().toLocaleString();
+            document.getElementById('result').innerHTML = '';
+            uploadImage();
+        }
 
-  async function startCam() {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' }, audio: false });
-      video.srcObject = stream;
-      video.style.display = 'block';
-      idle.style.display = 'none';
-      canvas.style.display = 'none';
-      btnStart.style.display = 'none';
-      btnSnap.disabled = false;
-      badge.style.display = 'none';
-      logEl.style.display = 'none';
-    } catch (e) {
-      log('Camera error: ' + e.message);
-    }
-  }
+        async function uploadImage() {
+            if (!capturedText) {
+                alert('Please take a photo first');
+                return;
+            }
 
-  function retake() {
-    canvas.style.display = 'none';
-    video.style.display = 'block';
-    btnSnap.disabled = false;
-    btnRetake.style.display = 'none';
-    badge.style.display = 'none';
-    logEl.style.display = 'none';
-  }
+            document.getElementById('loading').style.display = 'block';
 
-  async function snapAndSend() {
-    btnSnap.disabled = true;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    canvas.style.display = 'block';
-    video.style.display = 'none';
-    btnRetake.style.display = 'flex';
-    setBadge('Sending...', '#888', '#fff', '#ccc');
+            try {
+                const response = await fetch(SERVER, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filename: 'photo.jpg',
+                        text: capturedText
+                    })
+                });
 
-    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
-    const form = new FormData();
-    form.append('file', blob, 'photo.jpg');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('result').innerHTML = 
+                        '<h3>Success:</h3><p>Text sent successfully!</p>';
+                } else {
+                    document.getElementById('result').innerHTML = 
+                        '<h3>Error:</h3><p>' + data.error + '</p>';
+                }
 
-    const t = Date.now();
-    try {
-      const res = await fetch(SERVER, { method: 'POST', body: form });
-      const elapsed = Date.now() - t;
-      let body = '';
-      try { body = await res.text(); } catch(_) {}
-      if (res.ok) {
-        setBadge('Sent', '#166534', '#dcfce7', '#86efac');
-        log(res.status + ' — ' + elapsed + 'ms\n' + body.slice(0, 600));
-      } else {
-        setBadge('Failed', '#991b1b', '#fee2e2', '#fca5a5');
-        log(res.status + ' ' + res.statusText + ' — ' + elapsed + 'ms\n' + body.slice(0, 600));
-      }
-    } catch (e) {
-      setBadge('Error', '#991b1b', '#fee2e2', '#fca5a5');
-      log('Network error: ' + e.message);
-    }
-  }
+            } catch (error) {
+                document.getElementById('result').innerHTML = 
+                    '<h3>Error:</h3><p>' + error.message + '</p>';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
 
-  function setBadge(text, color, bg, border) {
-    badge.textContent = text;
-    badge.style.display = 'block';
-    badge.style.color = color;
-    badge.style.background = bg;
-    badge.style.borderColor = border;
-  }
-
-  function log(msg) { logEl.style.display = 'block'; logEl.textContent = msg; }
-</script>
+        startCamera();
+    </script>
 </body>
 </html>
