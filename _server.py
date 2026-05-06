@@ -1,21 +1,47 @@
 from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS
 import logging
 import os
 from datetime import datetime
+import easyocr
+from PIL import Image
+import io
 
 app = Flask(__name__)
+CORS(app)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+reader = easyocr.Reader(['en'])
 
 @app.route('/api/text', methods=['POST'])
 def receive_text():
     try:
-        data = request.get_json()
-        if not data or 'filename' not in data or 'text' not in data:
-            return jsonify({'error': 'Invalid JSON data'}), 400
-        
-        filename = data['filename']
-        text = data['text']
+        content_type = request.content_type or ''
+
+        if 'application/json' in content_type:
+            data = request.get_json()
+            if not data or 'filename' not in data or 'text' not in data:
+                return jsonify({'error': 'Invalid JSON data'}), 400
+
+            filename = data['filename']
+            text = data['text']
+
+        elif 'multipart/form-data' in content_type:
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file provided'}), 400
+
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'error': 'No file selected'}), 400
+
+            image = Image.open(io.BytesIO(file.read()))
+            results = reader.readtext(image)
+            text = ' '.join([result[1] for result in results]).strip()
+            filename = file.filename
+
+        else:
+            return jsonify({'error': 'Unsupported content type'}), 400
         
         logging.info(f"Received text from {filename}: {text[:100]}...")
         
@@ -36,7 +62,7 @@ def receive_text():
         logging.error(f"Error processing request: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/texts', methods=['GET'])
+@app.route('/api/text', methods=['GET'])
 def get_texts():
     try:
         texts_dir = 'extracted_texts'
