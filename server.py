@@ -1,11 +1,12 @@
 from flask import Flask, request, jsonify, render_template_string
-import logging
 import os
 from datetime import datetime
+import easyocr
 
 app = Flask(__name__)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+STORAGE_DIR = 'extracted_texts'
+os.makedirs(STORAGE_DIR, exist_ok=True)
+reader = easyocr.Reader(['en'])
 
 @app.route('/api/text', methods=['POST'])
 def receive_text():
@@ -17,8 +18,6 @@ def receive_text():
         filename = data['filename']
         text = data['text']
         
-        logging.info(f"Received text from {filename}: {text[:100]}...")
-        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_file = f"extracted_texts/{timestamp}_{filename}.txt"
         os.makedirs('extracted_texts', exist_ok=True)
@@ -28,239 +27,153 @@ def receive_text():
             f.write(f"Timestamp: {datetime.now()}\n")
             f.write(f"Text:\n{text}\n")
         
-        logging.info(f"Saved text to {output_file}")
-        
         return jsonify({'status': 'success', 'file': output_file})
     
     except Exception as e:
-        logging.error(f"Error processing request: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/image', methods=['POST'])
+def receive_image():
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image provided'}), 400
+            
+        file = request.files['image']
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        img_path = os.path.join(STORAGE_DIR, f"{timestamp}_capture.jpg")
+        file.save(img_path)
+        
+        results = reader.readtext(img_path)
+        text = ' '.join([result[1] for result in results]).strip()
+        
+        output_file = img_path + ".txt"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(f"Filename: capture.jpg\n")
+            f.write(f"Timestamp: {datetime.now()}\n")
+            f.write(f"Text:\n{text}\n")
+            
+        return jsonify({'status': 'success', 'text': text})
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/text', methods=['GET'])
 def get_texts():
     try:
-        texts_dir = 'extracted_texts'
-        if not os.path.exists(texts_dir):
-            return jsonify({'texts': []})
-        
         texts = []
-        for file in sorted(os.listdir(texts_dir), reverse=True):  # Most recent first
-            if file.endswith('.txt'):
-                filepath = os.path.join(texts_dir, file)
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    lines = content.split('\n')
-                    text_content = '\n'.join(lines[3:]) if len(lines) > 3 else ''
-                    texts.append({'id': file, 'text': text_content.strip()})
-        
+        if os.path.exists(STORAGE_DIR):
+            for file in sorted(os.listdir(STORAGE_DIR), reverse=True):
+                if file.endswith('.txt'):
+                    filepath = os.path.join(STORAGE_DIR, file)
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read().split('\n')
+                        texts.append({'id': file, 'text': '\n'.join(content[3:]).strip()})
         return jsonify({'texts': texts})
-    
     except Exception as e:
-        logging.error(f"Error retrieving texts: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/text/<path:file_id>', methods=['DELETE'])
 def delete_text(file_id):
     try:
-        filepath = os.path.join('extracted_texts', file_id)
+        filepath = os.path.join(STORAGE_DIR, file_id)
         if os.path.exists(filepath):
             os.remove(filepath)
             return jsonify({'status': 'success'})
-        return jsonify({'error': 'File not found'}), 404
+        return jsonify({'error': 'Not found'}), 404
     except Exception as e:
-        logging.error(f"Error deleting text: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def camera():
-    html = '''
+    return render_template_string('''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Photo OCR App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #000; }
+        video { width: 100vw; height: 100vh; object-fit: cover; }
+        .shutter {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 70px; height: 70px; background: white; border-radius: 50%; border: none;
+        }
+    </style>
 </head>
 <body>
-    <div>
-        <video id="video" width="300" height="200" autoplay></video>
-        <br>
-        <button onclick="takePhoto()">Take Photo</button>
-    </div>
-
-    <canvas id="canvas" width="300" height="200" style="display:none;"></canvas>
-
-    <div id="imagePreview"></div>
-
-    <div id="loading" style="display:none;">
-        <p>Processing image...</p>
-    </div>
-
-    <div id="result"></div>
-
+    <video id="video" autoplay playsinline></video>
+    <button class="shutter" onclick="takePhoto()"></button>
+    <canvas id="canvas" style="display:none;"></canvas>
     <script>
-        const SERVER = '/api/text';
-        let capturedText = '';
-
-        async function startCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment' }
-                });
-                document.getElementById('video').srcObject = stream;
-            } catch (error) {
-                alert('Camera access denied: ' + error.message);
-            }
-        }
-
-        function takePhoto() {
-            const video = document.getElementById('video');
-            const canvas = document.getElementById('canvas');
-            const context = canvas.getContext('2d');
-
-            context.drawImage(video, 0, 0, 300, 200);
-
-            const imageUrl = canvas.toDataURL('image/jpeg', 0.8);
-            document.getElementById('imagePreview').innerHTML =
-                '<img src="' + imageUrl + '" width="300" alt="Captured photo">';
-
-            capturedText = 'Photo captured at ' + new Date().toLocaleString();
-            document.getElementById('result').innerHTML = '';
-            uploadImage();
-        }
-
-        async function uploadImage() {
-            if (!capturedText) {
-                alert('Please take a photo first');
-                return;
-            }
-
-            document.getElementById('loading').style.display = 'block';
-
-            try {
-                const response = await fetch(SERVER, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        filename: 'photo.jpg',
-                        text: capturedText
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    document.getElementById('result').innerHTML =
-                        '<h3>Success:</h3><p>Text sent successfully!</p>';
-                } else {
-                    document.getElementById('result').innerHTML =
-                        '<h3>Error:</h3><p>' + data.error + '</p>';
+        const video = document.getElementById('video');
+        async function start() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { 
+                    facingMode: 'environment',
+                    width: { ideal: window.innerWidth },
+                    height: { ideal: window.innerHeight }
                 }
-
-            } catch (error) {
-                document.getElementById('result').innerHTML =
-                    '<h3>Error:</h3><p>' + error.message + '</p>';
-            } finally {
-                document.getElementById('loading').style.display = 'none';
-            }
+            });
+            video.srcObject = stream;
         }
-
-        startCamera();
+        async function takePhoto() {
+            const canvas = document.getElementById('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('image', blob, 'photo.jpg');
+                await fetch('/api/image', { method: 'POST', body: formData });
+            }, 'image/jpeg', 0.9);
+        }
+        start();
     </script>
 </body>
 </html>
-'''
-    return render_template_string(html)
+''')
 
 @app.route('/quiz')
-def index():
-    html = '''
+def quiz():
+    return render_template_string('''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>OCR Texts</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        body { font-family: sans-serif; background: #f5f5f5; padding: 15px; margin: 0; }
         .text-item { 
             border: 1px solid #ddd; 
             padding: 15px; 
-            margin: 15px 0; 
+            margin-bottom: 10px; 
+            background: white; 
             white-space: pre-wrap; 
-            position: relative; 
-            background: white;
-            border-radius: 8px;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .text-item:hover {
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            word-break: break-all;
             cursor: pointer;
         }
-        .text-item .actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; }
-        .text-item .actions button { 
-            padding: 6px 12px; 
-            border: none; 
-            border-radius: 4px; 
-            cursor: pointer; 
-            font-size: 12px;
-            transition: all 0.2s ease;
-            background: #e0e0e0;
-        }
-        .text-item .actions button:hover { 
-            transform: scale(1.05);
-        }
-        .text-item .actions button.copy-btn { background: #4caf50; color: white; }
-        .text-item .actions button.cut-btn { background: #ff9800; color: white; }
-        .text-item .actions button.delete-btn { background: #f44336; color: white; }
-        .text-item .actions button.copied { 
-            background: #2196f3; 
-            animation: pulse 0.5s;
-        }
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); }
-        }
-        .loading { color: #666; }
     </style>
 </head>
 <body>
     <div id="texts-container"></div>
     <script>
-        async function fetchTexts() {
-            try {
-                const response = await fetch('/api/texts');
-                const data = await response.json();
-                const container = document.getElementById('texts-container');
-                
-                if (data.texts && data.texts.length > 0) {
-                    container.innerHTML = data.texts.map(item => 
-                        `<div class="text-item" data-id="${item.id}" onclick="cutText(this)">${item.text}</div>`
-                    ).join('');
-                }
-            } catch (error) {
-                document.getElementById('texts-container').innerHTML = 
-                    '<div class="loading">Error loading texts. Please try again.</div>';
-                console.error('Error fetching texts:', error);
-            }
+        async function load() {
+            const res = await fetch('/api/text');
+            const data = await res.json();
+            document.getElementById('texts-container').innerHTML = data.texts.map(t => 
+                `<div class="text-item" onclick="cutText(this, '${t.id}')">${t.text}</div>`
+            ).join('');
         }
-
-        async function cutText(element) {
-            const text = element.textContent.trim();
-            await navigator.clipboard.writeText(text);
-            const fileId = element.dataset.id;
-            await fetch(`/api/text/${fileId}`, { method: 'DELETE' });
-            element.classList.add('removing');
-            setTimeout(() => element.remove(), 500);
+        async function cutText(el, id) {
+            await navigator.clipboard.writeText(el.textContent);
+            await fetch(`/api/text/${id}`, { method: 'DELETE' });
+            el.remove();
         }
-
-        fetchTexts();
-        setInterval(fetchTexts, 2000);
+        load();
+        setInterval(load, 2000);
     </script>
 </body>
 </html>
-'''
-    return render_template_string(html)
+''')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3000, debug=False)
+    app.run(host='0.0.0.0', port=3000)
